@@ -1,0 +1,29 @@
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; color: #233044; background: #f6f4ef; }
+.topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem 1.5rem; background: #233044; color: #fff; }
+.topbar a { color: #fff; text-decoration: none; }
+.brand { font-weight: 700; font-size: 1.15rem; }
+.nav { display: flex; align-items: center; gap: 1rem; }
+.who { opacity: 0.8; font-size: 0.9rem; }
+.badge { display: inline-block; min-width: 1.4em; margin-left: 0.3em; padding: 0 0.35em; border-radius: 1em; background: #2a9d8f; text-align: center; font-size: 0.85rem; }
+main { max-width: 960px; margin: 1.5rem auto; padding: 0 1rem; }
+.card { background: #fff; border-radius: 10px; padding: 1.25rem 1.5rem; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08); }
+.narrow { max-width: 380px; margin: 2rem auto; }
+form label, .search { display: block; margin: 0.75rem 0; font-weight: 600; }
+input { display: block; width: 100%; margin-top: 0.3rem; padding: 0.5rem 0.6rem; border: 1px solid #c9c4b8; border-radius: 6px; font: inherit; }
+button { padding: 0.5rem 1rem; border: 0; border-radius: 6px; background: #2a9d8f; color: #fff; font: inherit; cursor: pointer; }
+button:disabled { background: #b8b3a7; cursor: not-allowed; }
+button.link { padding: 0; background: none; color: inherit; text-decoration: underline; }
+.topbar button.link { color: #fff; }
+.error { color: #b4553f; font-weight: 600; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 1rem; padding: 0; list-style: none; }
+.book h2 { margin: 0 0 0.25rem; font-size: 1.05rem; }
+.author { margin: 0; color: #6b7280; }
+.price { font-weight: 700; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 0.5rem; border-bottom: 1px solid #eee; text-align: left; }
+.totals { display: grid; grid-template-columns: max-content max-content; gap: 0.35rem 1.5rem; justify-content: end; }
+.totals dt { font-weight: 600; }
+.totals dd { margin: 0; text-align: right; }
+.fx { text-align: right; color: #6b7280; }
+.footer { text-align: center; color: #6b7280; font-size: 0.85rem; padding: 2rem 0; }

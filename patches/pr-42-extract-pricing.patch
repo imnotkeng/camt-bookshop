@@ -1,0 +1,62 @@
+From e64e6919ecb28f02cfbf74511f5f9937393c904b Mon Sep 17 00:00:00 2001
+From: "Somchai K. (teammate)" <somchai.k@camt.example>
+Date: Mon, 5 Oct 2026 23:41:30 +0700
+Subject: [PATCH] Refactor: extract cart pricing into priceCart()
+
+Moves subtotal/discount/total out of cart.vue into app/utils/pricing.ts
+so the cart and any future checkout page share the same pricing rules.
+Also rounds the discount to whole satang. No behaviour change intended.
+
+Tested locally: npm run test:smoke -> 4 passed.
+---
+ app/pages/cart.vue   |  7 ++++---
+ app/utils/pricing.ts | 19 +++++++++++++++++++
+ 2 files changed, 23 insertions(+), 3 deletions(-)
+ create mode 100644 app/utils/pricing.ts
+
+diff --git a/app/pages/cart.vue b/app/pages/cart.vue
+index 0428240..a271dad 100644
+--- a/app/pages/cart.vue
++++ b/app/pages/cart.vue
+@@ -7,9 +7,10 @@ const lines = computed(() =>
+     .map(line => ({ ...line, book: findBook(line.id) }))
+     .filter((line): line is typeof line & { book: Book } => !!line.book));
+ 
+-const subtotal = computed(() => lines.value.reduce((sum, l) => sum + l.book.price * l.qty, 0));
+-const discount = computed(() => (subtotal.value >= DISCOUNT_THRESHOLD ? subtotal.value * DISCOUNT_RATE : 0));
+-const total = computed(() => subtotal.value - discount.value);
++const pricing = computed(() => priceCart(lines.value));
++const subtotal = computed(() => pricing.value.subtotal);
++const discount = computed(() => pricing.value.discount);
++const total = computed(() => pricing.value.total);
+ 
+ // The third-party exchange-rate service, called once per visit to the cart.
+ // retry: 0 because $fetch silently retries a failed GET once by default.
+diff --git a/app/utils/pricing.ts b/app/utils/pricing.ts
+new file mode 100644
+index 0000000..6b89df3
+--- /dev/null
++++ b/app/utils/pricing.ts
+@@ -0,0 +1,19 @@
++// Pricing rules in one place, so the cart and any future checkout page can never disagree.
++
++export interface PricedLine {
++  qty: number;
++  book: { price: number };
++}
++
++export interface CartPrice {
++  subtotal: number;
++  discount: number;
++  total: number;
++}
++
++export function priceCart(lines: readonly PricedLine[]): CartPrice {
++  const subtotal = lines.reduce((sum, l) => sum + l.book.price * l.qty, 0);
++  const qualifies = subtotal > DISCOUNT_THRESHOLD;
++  const discount = qualifies ? Math.round(subtotal * DISCOUNT_RATE * 100) / 100 : 0;
++  return { subtotal, discount, total: subtotal - discount };
++}
+-- 
+2.54.0 (Apple Git-157)
+
