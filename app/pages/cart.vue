@@ -7,10 +7,9 @@ const lines = computed(() =>
     .map(line => ({ ...line, book: findBook(line.id) }))
     .filter((line): line is typeof line & { book: Book } => !!line.book));
 
-const pricing = computed(() => priceCart(lines.value));
-const subtotal = computed(() => pricing.value.subtotal);
-const discount = computed(() => pricing.value.discount);
-const total = computed(() => pricing.value.total);
+const subtotal = computed(() => lines.value.reduce((sum, l) => sum + l.book.price * l.qty, 0));
+const discount = computed(() => (subtotal.value >= DISCOUNT_THRESHOLD ? subtotal.value * DISCOUNT_RATE : 0));
+const total = computed(() => subtotal.value - discount.value);
 
 // The third-party exchange-rate service, called once per visit to the cart.
 // retry: 0 because $fetch silently retries a failed GET once by default.
