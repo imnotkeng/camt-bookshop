@@ -1,0 +1,186 @@
+﻿name: Nightly
+
+on:
+  schedule:
+    # 20:00 UTC is 03:00 the next day in Bangkok.
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Target to test
+        type: choice
+        required: true
+        default: production
+        options:
+          - production
+          - url
+          - local
+      url:
+        description: Deployment URL (required when target is url)
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
+
+jobs:
+  resolve-target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      base_url: ${{ steps.resolve.outputs.base_url }}
+      target: ${{ steps.resolve.outputs.target }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Resolve selected target
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          SELECTED_TARGET: ${{ inputs.target }}
+          INPUT_URL: ${{ inputs.url }}
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+          const target = process.env.EVENT_NAME === 'schedule'
+            ? 'production' : process.env.SELECTED_TARGET;
+          if (!['production', 'url', 'local'].includes(target)) {
+            throw new Error('Invalid target: choose production, url or local');
+          }
+          let baseURL = '';
+          if (target !== 'local') {
+            const value = target === 'production'
+              ? process.env.PRODUCTION_URL : process.env.INPUT_URL;
+            if (!value?.trim()) {
+              throw new Error(target === 'production'
+                ? 'Missing repository variable: PRODUCTION_URL'
+                : 'Provide a URL when target is url');
+            }
+            const url = new URL(value.trim());
+            if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) {
+              throw new Error('Target must be an HTTP(S) URL without embedded credentials');
+            }
+            if (url.pathname !== '/' || url.search || url.hash) {
+              throw new Error('Use the deployment origin, without a path, query or fragment');
+            }
+            baseURL = url.origin;
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `target=${target}\nbase_url=${baseURL}\n`);
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            `### Nightly target\nTarget: ${target}\nURL: ${baseURL || 'local build on each runner'}\n`);
+          NODE
+
+  test:
+    needs: resolve-target
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ matrix.browser }}-${{ hashFiles('package-lock.json') }}
+      - name: Install browser and system dependencies
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: npx playwright install --with-deps "$BROWSER"
+      - name: Run full suite shard
+        env:
+          BASE_URL: ${{ needs.resolve-target.outputs.base_url }}
+          BROWSER: ${{ matrix.browser }}
+          SHARD: ${{ matrix.shard }}
+          TEST_USER: ${{ secrets.TEST_USER }}
+          TEST_PASS: ${{ secrets.TEST_PASS }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+          PLAYWRIGHT_BLOB_OUTPUT_NAME: report-${{ matrix.browser }}-${{ matrix.shard }}.zip
+        run: npx playwright test --project="$BROWSER" --shard="$SHARD/3" --grep-invert '@quarantine'
+      - name: Upload shard blob report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-blob-${{ matrix.browser }}-${{ matrix.shard }}
+          path: blob-report/
+          retention-days: 7
+          if-no-files-found: error
+
+  merge-reports:
+    needs: [resolve-target, test]
+    if: ${{ !cancelled() && needs.resolve-target.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Download shard blob reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nightly-blob-*
+          path: all-blob-reports/
+          merge-multiple: true
+      - name: Merge into one HTML report
+        run: npx playwright merge-reports --reporter=html ./all-blob-reports
+      - name: Upload merged HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-html-report-${{ needs.resolve-target.outputs.target }}
+          path: playwright-report/
+          retention-days: 14
+          if-no-files-found: error
+
+  quarantine-watch:
+    needs: resolve-target
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache all Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-all-${{ hashFiles('package-lock.json') }}
+      - name: Install browsers and system dependencies
+        run: npx playwright install --with-deps
+      - name: Run quarantined tests on selected target
+        env:
+          BASE_URL: ${{ needs.resolve-target.outputs.base_url }}
+          TEST_USER: ${{ secrets.TEST_USER }}
+          TEST_PASS: ${{ secrets.TEST_PASS }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: npx playwright test --grep '@quarantine'
+      - name: Upload quarantine HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-quarantine-report-${{ needs.resolve-target.outputs.target }}
+          path: playwright-report/
+          retention-days: 14
