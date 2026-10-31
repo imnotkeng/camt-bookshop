@@ -6,3 +6,6 @@ test-results/
 playwright-report/
 blob-report/
 .env
+.vercel
+.env*
+!.env.example
