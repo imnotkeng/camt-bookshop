@@ -1,0 +1,123 @@
+﻿name: PR gate
+
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+
+env:
+  CI: 'true'
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Run local smoke tests
+        env:
+          TEST_USER: ${{ secrets.TEST_USER }}
+          TEST_PASS: ${{ secrets.TEST_PASS }}
+        run: npx playwright test --project=chromium --grep '@smoke' --grep-invert '@quarantine'
+      - name: Upload smoke report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: playwright-report/
+          retention-days: 14
+
+  deploy-preview:
+    needs: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    outputs:
+      preview_url: ${{ steps.deploy.outputs.preview_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install Vercel CLI
+        run: npm install --global vercel@65.9.0
+      - name: Pull preview settings
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=preview --token="$VERCEL_TOKEN"
+      - name: Build preview
+        env:
+          NITRO_PRESET: vercel
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel build --token="$VERCEL_TOKEN"
+      - name: Verify Vercel build output
+        run: |
+          test -f .vercel/output/config.json
+          test -d .vercel/output/static
+          test -d .vercel/output/functions
+      - name: Deploy preview and expose URL
+        id: deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          preview_url="$(vercel deploy --prebuilt --environment=preview --token="$VERCEL_TOKEN")"
+          if [[ ! "$preview_url" =~ ^https://[^[:space:]]+\.vercel\.app$ ]]; then
+            echo "::error::Vercel did not return a valid preview deployment URL"
+            exit 1
+          fi
+          echo "preview_url=$preview_url" >> "$GITHUB_OUTPUT"
+          echo "### Preview deployment" >> "$GITHUB_STEP_SUMMARY"
+          echo "$preview_url" >> "$GITHUB_STEP_SUMMARY"
+
+  test-preview:
+    needs: deploy-preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-${{ hashFiles('package-lock.json') }}
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Run preview smoke tests
+        env:
+          BASE_URL: ${{ needs.deploy-preview.outputs.preview_url }}
+          TEST_USER: ${{ secrets.TEST_USER }}
+          TEST_PASS: ${{ secrets.TEST_PASS }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: npx playwright test --project=chromium --grep '@smoke' --grep-invert '@quarantine'
+      - name: Upload preview report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: preview-smoke-report
+          path: playwright-report/
+          retention-days: 14
