@@ -27,7 +27,7 @@ async function onSubmit(): Promise<void> {
       <label>Email <input v-model="email" name="email" type="email" autocomplete="username" required></label>
       <label>Password <input v-model="password" name="password" type="password" autocomplete="current-password" required></label>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <button type="submit">Sign in</button>
+      <button type="submit">Log in</button>
     </form>
   </section>
 </template>
